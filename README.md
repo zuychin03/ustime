@@ -40,7 +40,32 @@ npm run dev
 
 ## Status
 
-Stage 0 (foundation) plus the start of Stage 1: the tested pure helpers
-(timezones/DST, OKLCH blend, rrule recurrence, free-time finder), onboarding,
-pairing, the app shell, and the dashboard. The rest of Stage 1 (week grid,
-free-time finder UI, realtime, study timer) is next.
+**Stage 0 (foundation) and Stage 1 (core calendar MVP) are complete.**
+
+Stage 1 ships:
+
+- **Calendar** — a custom Vue week grid (no FullCalendar) with hour rows, day
+  columns, a "now" line, drag-to-create and tap-to-edit, plus a read-only month
+  summary.
+- **Events** — full CRUD with optimistic updates via TanStack Query, owner
+  (me / partner / shared), per-event colour override, all-day flag, location,
+  and rrule recurrence.
+- **Colour blending** — overlapping events render the OKLCH midpoint blend with
+  a diagonal texture; shared events are blended for their whole duration.
+- **Dual-timezone display** — the time axis can show mine / theirs / both, and
+  every event shows both partners' local times.
+- **Free-time finder** — mutual free windows over the next 14 days (excluding
+  events and sleep hours); one tap books a call or study event.
+- **Study-with-me** — a synced Pomodoro timer over Supabase Realtime broadcast
+  (absolute `endsAt` timestamps, so clocks can't drift), session logging, and
+  cumulative "hours studied together".
+- **Presence, status & pings** — partner online/offline + manual status over a
+  presence channel, and a rate-limited "thinking of you" ping (in-app toast).
+- **Countdown** — dashboard card counting down to the next `visit` (or days
+  since the last one).
+
+Realtime is wired through a single `couple:{id}` channel
+(`useCoupleChannel`): presence, broadcast (ping / timer / status) and
+`postgres_changes` on `events` to invalidate caches.
+
+Next up is Stage 2 (Google Calendar import, milestones, memories, PWA + push).

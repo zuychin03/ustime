@@ -8,11 +8,22 @@ import {
 	LogOut,
 	Settings
 } from 'lucide-vue-next';
+import { toast } from 'vue-sonner';
 import { Button } from '~/components/ui/button';
+import { Toaster } from '~/components/ui/sonner';
 
 const route = useRoute();
 const user = useSupabaseUser();
 const supabase = useSupabaseClient();
+const { ctx } = useCoupleContext();
+
+// One channel for the whole app shell: surfaces pings as toasts anywhere.
+const { on } = useCoupleChannel();
+on('ping', () => {
+	toast('Thinking of you 💜', {
+		description: `${ctx.value?.partner?.display_name ?? 'Your partner'} just sent you a ping`
+	});
+});
 
 const nav = [
 	{ href: '/calendar', label: 'Calendar', icon: CalendarDays },
@@ -35,7 +46,9 @@ async function signOut() {
 <template>
 	<div class="min-h-screen bg-background md:flex">
 		<!-- Desktop sidebar -->
-		<aside class="hidden w-60 shrink-0 flex-col border-r bg-card md:flex">
+		<aside
+			class="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start overflow-y-auto border-r bg-card md:flex"
+		>
 			<div class="flex h-16 items-center gap-2 px-5 font-display text-xl font-semibold">
 				<span class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
 					<Heart class="size-4" />
@@ -113,5 +126,7 @@ async function signOut() {
 				</NuxtLink>
 			</nav>
 		</div>
+
+		<Toaster position="top-center" rich-colors />
 	</div>
 </template>

@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'vue-sonner/style.css';
 @import '@fontsource-variable/fraunces/index.css';
 @import '@fontsource-variable/plus-jakarta-sans/index.css';
 @plugin '@tailwindcss/forms';
