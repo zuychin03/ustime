@@ -239,7 +239,11 @@ function draftStyle(d: Draft) {
 							/>
 						</div>
 
-						<OverlapLayer :segments="col.overlaps" @select="emit('selectOverlap', $event)" />
+						<OverlapLayer
+							:segments="col.overlaps"
+							:zone="zone"
+							@select="emit('selectOverlap', $event)"
+						/>
 
 						<EventChip
 							v-for="entry in col.segments"

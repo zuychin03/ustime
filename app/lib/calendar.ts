@@ -227,9 +227,9 @@ export interface OverlapSegment extends Interval {
 	/** The two overlapping occurrences (mine first, partner's second). */
 	mine: Occurrence;
 	theirs: Occurrence;
-	/** Titles of activities the band covers entirely (their own tile is hidden,
-	 * so the band shows the label on their behalf). */
-	coveredTitles: string[];
+	/** Occurrences the band covers entirely (their own tile is hidden, so the
+	 * band shows the label on their behalf). */
+	covered: Occurrence[];
 }
 
 const COVER_EPS = 0.5;
@@ -248,12 +248,12 @@ export function overlapSegments(
 			const start = Math.max(a.startMin, b.startMin);
 			const end = Math.min(a.endMin, b.endMin);
 			if (start < end) {
-				const coveredTitles: string[] = [];
+				const covered: Occurrence[] = [];
 				if (start - a.startMin < COVER_EPS && a.endMin - end < COVER_EPS) {
-					coveredTitles.push(a.occurrence.event.title);
+					covered.push(a.occurrence);
 				}
 				if (start - b.startMin < COVER_EPS && b.endMin - end < COVER_EPS) {
-					coveredTitles.push(b.occurrence.event.title);
+					covered.push(b.occurrence);
 				}
 				out.push({
 					start,
@@ -262,7 +262,7 @@ export function overlapSegments(
 					titles: [a.occurrence.event.title, b.occurrence.event.title],
 					mine: a.occurrence,
 					theirs: b.occurrence,
-					coveredTitles
+					covered
 				});
 			}
 		}
