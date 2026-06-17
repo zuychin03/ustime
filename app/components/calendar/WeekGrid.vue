@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { DateTime } from 'luxon';
-import {
-	allDayForDay,
-	daySegments,
-	labelAnchor,
-	overlapSegments,
-	type Occurrence,
-	type OverlapSegment
-} from '~/lib/calendar';
+import { allDayForDay, layoutDay, type Occurrence, type OverlapSegment } from '~/lib/calendar';
 import type { EventRow } from '~/lib/types';
 import { readableTextColor } from '~/lib/utils/blend';
 import EventChip from './EventChip.vue';
@@ -58,18 +51,15 @@ const hourLabels = computed(() =>
 
 const columns = computed(() =>
 	props.days.map((day) => {
-		const segs = daySegments(props.occurrences, day, props.zone);
-		const mine = segs.filter((s) => s.occurrence.ownerKind === 'me');
-		const theirs = segs.filter((s) => s.occurrence.ownerKind === 'partner');
-		const overlaps = overlapSegments(mine, theirs, props.myColour, props.partnerColour);
+		const { tiles, flags } = layoutDay(props.occurrences, day, props.zone);
 		return {
 			day,
 			label: day.toFormat('ccc'),
 			dayNum: day.toFormat('d'),
 			isToday: day.hasSame(DateTime.now().setZone(props.zone), 'day'),
 			isWeekend: day.weekday > 5,
-			segments: segs.map((seg) => ({ seg, anchor: labelAnchor(seg, overlaps) })),
-			overlaps,
+			segments: tiles,
+			overlaps: flags,
 			allDay: allDayForDay(
 				props.events,
 				day,
@@ -239,23 +229,20 @@ function draftStyle(d: Draft) {
 							/>
 						</div>
 
-						<OverlapLayer
-							:segments="col.overlaps"
-							:zone="zone"
-							@select="emit('selectOverlap', $event)"
-						/>
-
+						<!-- Coloured tiles: full-width rectangles or clashing knives -->
 						<EventChip
-							v-for="entry in col.segments"
-							:key="entry.seg.occurrence.key"
-							:segment="entry.seg"
-							:anchor="entry.anchor"
+							v-for="seg in col.segments"
+							:key="seg.occurrence.key"
+							:segment="seg"
 							:zone="zone"
 							:my-zone="myZone"
 							:partner-zone="partnerZone"
 							@pointerdown.stop
-							@select="emit('select', entry.seg.occurrence)"
+							@select="emit('select', seg.occurrence)"
 						/>
+
+						<!-- Full-width blend bands behind the clashing blades -->
+						<OverlapLayer :segments="col.overlaps" @select="emit('selectOverlap', $event)" />
 
 						<!-- drag draft -->
 						<div

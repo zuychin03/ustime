@@ -11,7 +11,6 @@ import {
 import type { EventRow, EventType } from '~/lib/types';
 import { blend } from '~/lib/utils/blend';
 import { expandEvent } from '~/lib/utils/recurrence';
-import type { Interval } from '~/lib/utils/time';
 
 export type OwnerKind = 'me' | 'partner' | 'shared';
 
@@ -115,15 +114,30 @@ export interface DaySegment {
 	/** Minutes from midnight in the viewer zone. */
 	startMin: number;
 	endMin: number;
-	/** Lane packing for side-by-side overlapping events. */
-	lane: number;
-	lanes: number;
+	/** When clashing, the tile is a "knife": a wide blade over the overlap with a
+	 * thin handle below. A non-clashing tile stays a full-width rectangle. */
+	knife: boolean;
+	/** Minute the blade ends and the thin handle begins (knives only). */
+	bladeEndMin: number;
+	/** Stacking order (later clashing activities sit above earlier ones). */
+	z: number;
+}
+
+// Knife geometry (percent of the day column). The blade carries the label; the
+// handle is the thin stick spanning the rest of the activity.
+export const BLADE_WIDTH_PCT = 80;
+export const HANDLE_WIDTH_PCT = 13;
+
+interface Clip {
+	occurrence: Occurrence;
+	startMin: number;
+	endMin: number;
 }
 
 const DAY_MINUTES = 24 * 60;
 
 /** Clip an occurrence to a single day column (viewer zone) → minutes range. */
-function clipToDay(occ: Occurrence, dayStart: DateTime, zone: string): DaySegment | null {
+function clipToDay(occ: Occurrence, dayStart: DateTime, zone: string): Clip | null {
 	const dayEnd = dayStart.plus({ days: 1 });
 	const s = occ.start.setZone(zone);
 	const e = occ.end.setZone(zone);
@@ -135,58 +149,113 @@ function clipToDay(occ: Occurrence, dayStart: DateTime, zone: string): DaySegmen
 	return {
 		occurrence: occ,
 		startMin: Math.max(0, Math.min(DAY_MINUTES, startMin)),
-		endMin: Math.max(0, Math.min(DAY_MINUTES, endMin)),
-		lane: 0,
-		lanes: 1
+		endMin: Math.max(0, Math.min(DAY_MINUTES, endMin))
 	};
 }
 
-/** Greedy lane packing so overlapping events sit side by side. */
-function packLanes(segments: DaySegment[]): DaySegment[] {
-	const sorted = [...segments].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
-	const laneEnds: number[] = [];
-	for (const seg of sorted) {
-		let placed = false;
-		for (let i = 0; i < laneEnds.length; i++) {
-			if (seg.startMin >= laneEnds[i]!) {
-				seg.lane = i;
-				laneEnds[i] = seg.endMin;
-				placed = true;
-				break;
-			}
-		}
-		if (!placed) {
-			seg.lane = laneEnds.length;
-			laneEnds.push(seg.endMin);
-		}
-	}
-	// Resolve total lanes per overlapping cluster.
-	for (const seg of sorted) {
-		let lanes = 1;
-		for (const other of sorted) {
-			if (other === seg) continue;
-			if (seg.startMin < other.endMin && other.startMin < seg.endMin) {
-				lanes = Math.max(lanes, other.lane + 1);
-			}
-		}
-		seg.lanes = Math.max(seg.lane + 1, lanes);
-	}
-	return sorted;
+function overlaps(a: Clip, b: Clip): boolean {
+	return a.startMin < b.endMin && b.startMin < a.endMin;
 }
 
-export function daySegments(
-	occurrences: Occurrence[],
-	dayStart: DateTime,
-	zone: string
-): DaySegment[] {
-	const groups: Record<OwnerKind, DaySegment[]> = { me: [], partner: [], shared: [] };
-	for (const occ of occurrences) {
-		const seg = clipToDay(occ, dayStart, zone);
-		if (seg) groups[occ.ownerKind].push(seg);
+export interface OverlapSegment {
+	/** The overlap region, in minutes from midnight (viewer zone). */
+	start: number;
+	end: number;
+	/** OKLCH blend of the two clashing activities (full-width band behind the blade). */
+	colour: string;
+	/** Both activities, for the "you're both busy" dialog (mine first). */
+	mine: Occurrence;
+	theirs: Occurrence;
+	titles: [string, string];
+	/** Stacking order: behind its own blade, above the earlier activity. */
+	z: number;
+}
+
+export interface DayLayout {
+	/** Coloured tiles — full-width rectangles or knives. */
+	tiles: DaySegment[];
+	/** Full-width blend bands sitting behind each clash's blade. */
+	flags: OverlapSegment[];
+}
+
+/** End of the first (earliest, merged) clash region for `clip` — where its blade
+ * ends and the thin handle begins. Returns -1 when `clip` clashes with nobody. */
+function firstClashEnd(clip: Clip, clips: Clip[]): number {
+	const regions: Array<[number, number]> = [];
+	for (const other of clips) {
+		if (other === clip) continue;
+		const s = Math.max(clip.startMin, other.startMin);
+		const e = Math.min(clip.endMin, other.endMin);
+		if (s < e) regions.push([s, e]);
 	}
-	// Pack lanes within each owner, so my plans and my partner's plans both keep
-	// full width; their intersection is drawn as the blended overlap band.
-	return [...packLanes(groups.me), ...packLanes(groups.partner), ...packLanes(groups.shared)];
+	if (regions.length === 0) return -1;
+	regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+	let end = regions[0]![1];
+	for (let k = 1; k < regions.length; k++) {
+		if (regions[k]![0] <= end) end = Math.max(end, regions[k]![1]);
+		else break; // a gap → the first clash is done; the rest is handle
+	}
+	return end;
+}
+
+/**
+ * Lay out one day. Activities are taken in start order. One that overlaps nobody
+ * is a plain full-width rectangle. One that clashes with another becomes a knife
+ * — a wide blade across its first clash (carrying its label) tapering to a thin
+ * handle for the rest; the earliest of a clash simply has no handle. Behind each
+ * clash sits a full-width blend band. Later activities stack above earlier ones.
+ */
+export function layoutDay(occurrences: Occurrence[], dayStart: DateTime, zone: string): DayLayout {
+	const clips: Clip[] = [];
+	for (const occ of occurrences) {
+		const clip = clipToDay(occ, dayStart, zone);
+		if (clip) clips.push(clip);
+	}
+	clips.sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+
+	const tiles: DaySegment[] = [];
+	const flags: OverlapSegment[] = [];
+	const ranks: number[] = [];
+	for (let i = 0; i < clips.length; i++) {
+		const clip = clips[i]!;
+		// Stack above every earlier activity this one clashes with; each such pair
+		// gets a full-width blend band behind this (later) activity's blade.
+		let rank = 0;
+		const earlier: Clip[] = [];
+		for (let j = 0; j < i; j++) {
+			if (overlaps(clips[j]!, clip)) {
+				rank = Math.max(rank, ranks[j]! + 1);
+				earlier.push(clips[j]!);
+			}
+		}
+		ranks.push(rank);
+		const z = 10 + rank * 2;
+
+		const clashEnd = firstClashEnd(clip, clips);
+		tiles.push({
+			...clip,
+			knife: clashEnd >= 0,
+			bladeEndMin: clashEnd >= 0 ? clashEnd : clip.endMin,
+			z: z + 1
+		});
+
+		const later = clip.occurrence;
+		for (const before of earlier) {
+			const beforeOcc = before.occurrence;
+			const mine = beforeOcc.ownerKind === 'me' ? beforeOcc : later;
+			const theirs = mine === beforeOcc ? later : beforeOcc;
+			flags.push({
+				start: clip.startMin,
+				end: Math.min(clip.endMin, before.endMin),
+				colour: blend(later.colour, beforeOcc.colour),
+				mine,
+				theirs,
+				titles: [mine.event.title, theirs.event.title],
+				z
+			});
+		}
+	}
+	return { tiles, flags };
 }
 
 export interface AllDayChip {
@@ -219,74 +288,4 @@ export function allDayForDay(
 		}
 	}
 	return out;
-}
-
-export interface OverlapSegment extends Interval {
-	colour: string;
-	titles: [string, string];
-	/** The two overlapping occurrences (mine first, partner's second). */
-	mine: Occurrence;
-	theirs: Occurrence;
-	/** Occurrences the band covers entirely (their own tile is hidden, so the
-	 * band shows the label on their behalf). */
-	covered: Occurrence[];
-}
-
-const COVER_EPS = 0.5;
-
-/** Merge intersecting time ranges between mine and partner segments. */
-export function overlapSegments(
-	mine: DaySegment[],
-	theirs: DaySegment[],
-	myColour: string,
-	partnerColour: string
-): OverlapSegment[] {
-	const blended = blend(myColour, partnerColour);
-	const out: OverlapSegment[] = [];
-	for (const a of mine) {
-		for (const b of theirs) {
-			const start = Math.max(a.startMin, b.startMin);
-			const end = Math.min(a.endMin, b.endMin);
-			if (start < end) {
-				const covered: Occurrence[] = [];
-				if (start - a.startMin < COVER_EPS && a.endMin - end < COVER_EPS) {
-					covered.push(a.occurrence);
-				}
-				if (start - b.startMin < COVER_EPS && b.endMin - end < COVER_EPS) {
-					covered.push(b.occurrence);
-				}
-				out.push({
-					start,
-					end,
-					colour: blended,
-					titles: [a.occurrence.event.title, b.occurrence.event.title],
-					mine: a.occurrence,
-					theirs: b.occurrence,
-					covered
-				});
-			}
-		}
-	}
-	return out;
-}
-
-export type LabelAnchor = 'top' | 'bottom';
-
-/**
- * Where a tile's label should sit. If an overlap band hides the top of the tile
- * (but not all of it), move the label to the still-visible bottom. A fully
- * covered tile keeps its label on top, since its band is drawn translucent.
- */
-export function labelAnchor(seg: DaySegment, overlaps: OverlapSegment[]): LabelAnchor {
-	let topCovered = false;
-	let fullyCovered = false;
-	for (const ov of overlaps) {
-		if (ov.start <= seg.startMin + COVER_EPS && ov.end > seg.startMin + COVER_EPS) {
-			topCovered = true;
-		}
-		if (ov.start <= seg.startMin + COVER_EPS && ov.end >= seg.endMin - COVER_EPS) {
-			fullyCovered = true;
-		}
-	}
-	return topCovered && !fullyCovered ? 'bottom' : 'top';
 }
