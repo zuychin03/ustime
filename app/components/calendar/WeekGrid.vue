@@ -141,7 +141,10 @@ function draftStyle(d: Draft) {
 
 <template>
 	<div class="overflow-hidden rounded-xl border bg-card">
-		<div ref="scroller" class="relative overflow-auto" style="max-height: calc(100dvh - 13rem)">
+		<div
+			ref="scroller"
+			class="relative max-h-[calc(100dvh_-_17rem)] overflow-auto md:max-h-[calc(100dvh_-_13rem)]"
+		>
 			<div class="min-w-[820px]">
 				<!-- Header: weekday + optional all-day band -->
 				<div
@@ -229,7 +232,7 @@ function draftStyle(d: Draft) {
 							/>
 						</div>
 
-						<!-- Coloured tiles: full-width rectangles or clashing knives -->
+						<!-- Coloured tiles: full-width, or narrowed where they clash -->
 						<EventChip
 							v-for="seg in col.segments"
 							:key="seg.occurrence.key"

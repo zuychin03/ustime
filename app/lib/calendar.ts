@@ -114,19 +114,15 @@ export interface DaySegment {
 	/** Minutes from midnight in the viewer zone. */
 	startMin: number;
 	endMin: number;
-	/** When clashing, the tile is a "knife": a wide blade over the overlap with a
-	 * thin handle below. A non-clashing tile stays a full-width rectangle. */
-	knife: boolean;
-	/** Minute the blade ends and the thin handle begins (knives only). */
-	bladeEndMin: number;
+	/** Clashing tiles are narrowed to BLADE_WIDTH_PCT; the rest stay full width. */
+	clashing: boolean;
 	/** Stacking order (later clashing activities sit above earlier ones). */
 	z: number;
 }
 
-// Knife geometry (percent of the day column). The blade carries the label; the
-// handle is the thin stick spanning the rest of the activity.
+// A clashing tile is narrowed to this width (% of the day column) so the
+// full-width blend band shows in the strip beside it.
 export const BLADE_WIDTH_PCT = 80;
-export const HANDLE_WIDTH_PCT = 13;
 
 interface Clip {
 	occurrence: Occurrence;
@@ -161,49 +157,28 @@ export interface OverlapSegment {
 	/** The overlap region, in minutes from midnight (viewer zone). */
 	start: number;
 	end: number;
-	/** OKLCH blend of the two clashing activities (full-width band behind the blade). */
+	/** OKLCH blend of the two clashing activities (full-width band behind the tile). */
 	colour: string;
 	/** Both activities, for the "you're both busy" dialog (mine first). */
 	mine: Occurrence;
 	theirs: Occurrence;
 	titles: [string, string];
-	/** Stacking order: behind its own blade, above the earlier activity. */
+	/** Stacking order: behind its own tile, above the earlier activity. */
 	z: number;
 }
 
 export interface DayLayout {
-	/** Coloured tiles — full-width rectangles or knives. */
+	/** Coloured tiles — full-width, or narrowed where they clash. */
 	tiles: DaySegment[];
-	/** Full-width blend bands sitting behind each clash's blade. */
+	/** Full-width blend bands sitting behind each clash's narrowed tile. */
 	flags: OverlapSegment[];
-}
-
-/** End of the first (earliest, merged) clash region for `clip` — where its blade
- * ends and the thin handle begins. Returns -1 when `clip` clashes with nobody. */
-function firstClashEnd(clip: Clip, clips: Clip[]): number {
-	const regions: Array<[number, number]> = [];
-	for (const other of clips) {
-		if (other === clip) continue;
-		const s = Math.max(clip.startMin, other.startMin);
-		const e = Math.min(clip.endMin, other.endMin);
-		if (s < e) regions.push([s, e]);
-	}
-	if (regions.length === 0) return -1;
-	regions.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-	let end = regions[0]![1];
-	for (let k = 1; k < regions.length; k++) {
-		if (regions[k]![0] <= end) end = Math.max(end, regions[k]![1]);
-		else break; // a gap → the first clash is done; the rest is handle
-	}
-	return end;
 }
 
 /**
  * Lay out one day. Activities are taken in start order. One that overlaps nobody
- * is a plain full-width rectangle. One that clashes with another becomes a knife
- * — a wide blade across its first clash (carrying its label) tapering to a thin
- * handle for the rest; the earliest of a clash simply has no handle. Behind each
- * clash sits a full-width blend band. Later activities stack above earlier ones.
+ * is a full-width rectangle; one that clashes is narrowed (spanning its whole
+ * duration) so a full-width blend band shows in the strip behind it. Each clash
+ * pair gets one blend band, and later activities stack above earlier ones.
  */
 export function layoutDay(occurrences: Occurrence[], dayStart: DateTime, zone: string): DayLayout {
 	const clips: Clip[] = [];
@@ -219,7 +194,7 @@ export function layoutDay(occurrences: Occurrence[], dayStart: DateTime, zone: s
 	for (let i = 0; i < clips.length; i++) {
 		const clip = clips[i]!;
 		// Stack above every earlier activity this one clashes with; each such pair
-		// gets a full-width blend band behind this (later) activity's blade.
+		// gets a full-width blend band behind this (later) activity's tile.
 		let rank = 0;
 		const earlier: Clip[] = [];
 		for (let j = 0; j < i; j++) {
@@ -231,13 +206,11 @@ export function layoutDay(occurrences: Occurrence[], dayStart: DateTime, zone: s
 		ranks.push(rank);
 		const z = 10 + rank * 2;
 
-		const clashEnd = firstClashEnd(clip, clips);
-		tiles.push({
-			...clip,
-			knife: clashEnd >= 0,
-			bladeEndMin: clashEnd >= 0 ? clashEnd : clip.endMin,
-			z: z + 1
-		});
+		let clashing = earlier.length > 0;
+		for (let j = i + 1; !clashing && j < clips.length; j++) {
+			if (overlaps(clip, clips[j]!)) clashing = true;
+		}
+		tiles.push({ ...clip, clashing, z: z + 1 });
 
 		const later = clip.occurrence;
 		for (const before of earlier) {

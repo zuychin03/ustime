@@ -109,8 +109,8 @@ async function signOut() {
 				<slot />
 			</main>
 
-			<!-- Mobile bottom nav -->
-			<nav class="fixed inset-x-0 bottom-0 z-10 grid grid-cols-5 border-t bg-card md:hidden">
+			<!-- Mobile bottom nav (above the calendar's sticky time axis / header) -->
+			<nav class="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-card md:hidden">
 				<NuxtLink
 					v-for="item in nav"
 					:key="item.href"

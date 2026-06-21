@@ -50,8 +50,10 @@ Stage 1 ships:
 - **Events** — full CRUD with optimistic updates via TanStack Query, owner
   (me / partner / shared), per-event colour override, all-day flag, location,
   and rrule recurrence.
-- **Colour blending** — overlapping events render the OKLCH midpoint blend with
-  a diagonal texture; shared events are blended for their whole duration.
+- **Colour & overlaps** — each partner has a colour; shared events use the OKLCH
+  midpoint blend for their whole duration. When two events clash, the later one is
+  narrowed so a full-width OKLCH blend band shows in the strip beside it, marking
+  the shared busy time.
 - **Dual-timezone display** — the time axis can show mine / theirs / both, and
   every event shows both partners' local times.
 - **Free-time finder** — mutual free windows over the next 14 days (excluding

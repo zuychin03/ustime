@@ -21,8 +21,8 @@ function styleFor(seg: OverlapSegment) {
 </script>
 
 <template>
-	<!-- Full-width blend band behind the blade. Its exposed strip (beside the
-	blade) opens the "you're both busy" details for both activities. -->
+	<!-- Full-width blend band behind a clashing tile. Its exposed strip (beside the
+	tile) opens the "you're both busy" details for both activities. -->
 	<button
 		v-for="(seg, i) in props.segments"
 		:key="i"
